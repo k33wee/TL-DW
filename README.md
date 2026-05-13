@@ -6,7 +6,7 @@ Local video to readable Markdown extraction with speech transcription plus OCR-d
 
 Primary command:
 
-- `uv run -m main --video "path-to-video/video.mp4" --whisper-language it`
+- `uv run -m main --video "path-to-video/video.mp4" `
 
 Example with GPU, Italian, timestamps, OCR, and heuristic chapters:
 
@@ -41,10 +41,6 @@ Using `uv`:
 Process a single video:
 
 - `uv run -m main --video "path-to-video/video.mp4"`
-
-Process a single video in Italian:
-
-- `uv run -m main --video "path-to-video/video.mp4" --whisper-language it`
 
 Process every supported file in `videos/` directory:
 
@@ -118,7 +114,7 @@ Examples:
 
 Example:
 
-- `uv run python main.py --video "path-to-video/video.mp4" --device gpu --whisper-language it --whisper-model large-v3`
+- `uv run python main.py --video "path-to-video/video.mp4" --device gpu --whisper-model large-v3`
 
 ## GPU notes
 
