@@ -1,0 +1,20 @@
+[project]
+name = "tl-dw"
+version = "0.1.0"
+description = "Local video to readable document extraction tool"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "faster-whisper>=1.2.1",
+    "opencv-python>=4.13.0.92",
+    "rapidocr-onnxruntime>=1.4.4",
+    "wtpsplit>=2.0.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+tl-dw = "main:main"

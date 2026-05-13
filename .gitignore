@@ -1,0 +1,10 @@
+.git
+.github/instructions/
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+.venv/
+output/*
+test-video/
