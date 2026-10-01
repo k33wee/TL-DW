@@ -6,7 +6,7 @@ from typing import Sequence
 
 from tl_dw.common.time_utils import sec_to_hhmmss
 
-from .models import RenderedChapter
+from .models import RenderedChapter, VisualNote
 from .text_utils import safe_slug
 
 
@@ -46,7 +46,7 @@ def render_markdown(
         if chapter.visual_notes:
             lines.extend(["", "### Visual context"])
             for note in chapter.visual_notes:
-                lines.append(f"- {sec_to_hhmmss(note.timestamp)}: {note.text}")
+                lines.extend(render_visual_note(note))
         for paragraph in chapter.paragraphs:
             prefix = (
                 f"({sec_to_hhmmss(paragraph.start)}) " if timestamp_paragraphs else ""
@@ -54,6 +54,23 @@ def render_markdown(
             lines.extend(["", f"{prefix}{paragraph.text}"])
 
     return "\n".join(lines)
+
+
+def render_visual_note(note: VisualNote) -> list[str]:
+    lines = [f"- {sec_to_hhmmss(note.timestamp)}: {note.text}"]
+    image_path = relative_frame_path(note.image_path)
+    if image_path:
+        lines.extend(["", f"![{sec_to_hhmmss(note.timestamp)}]({image_path})", ""])
+    return lines
+
+
+def relative_frame_path(image_path: str | None) -> str | None:
+    if not image_path:
+        return None
+    candidate = Path(image_path)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        return None
+    return candidate.as_posix()
 
 
 def save_rendered_chapters(

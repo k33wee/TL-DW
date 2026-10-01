@@ -248,6 +248,44 @@ def test_render_markdown_includes_toc_and_timestamps() -> None:
     assert "(00:01:05) More detail here." in markdown
 
 
+def test_render_markdown_embeds_selected_frame_next_to_its_ocr_note() -> None:
+    chapters = [
+        RenderedChapter(
+            title="Tariffe",
+            start=0.0,
+            paragraphs=[Paragraph(start=0.0, text="La griglia mostra 102 celle.")],
+            visual_notes=[
+                VisualNote(
+                    timestamp=12.0,
+                    text="ConDuctor | 102/2",
+                    lines=["102/2"],
+                    confidence=0.9,
+                    image_path="frames/frame-0004-000012-000.jpg",
+                ),
+                VisualNote(
+                    timestamp=20.0,
+                    text="OCR without a retained frame",
+                    lines=["OCR"],
+                    confidence=0.8,
+                    image_path="../secret.jpg",
+                ),
+            ],
+        )
+    ]
+
+    markdown = render_markdown(
+        title="Demo",
+        source_path=Path("demo.mp4"),
+        chapters=chapters,
+        timestamp_paragraphs=False,
+        add_table_of_contents=False,
+    )
+
+    assert "![00:00:12](frames/frame-0004-000012-000.jpg)" in markdown
+    assert "../secret.jpg" not in markdown
+    assert "OCR without a retained frame" in markdown
+
+
 def test_filter_meaningful_ocr_lines_keeps_meeting_context() -> None:
     lines = [
         ("Google Meet", 0.98),

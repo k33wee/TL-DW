@@ -195,7 +195,7 @@ By default, artifacts are stored in `output/<video-slug>/`:
 | `visual_notes.json` | deduplicated OCR notes for the transcript document |
 | `analysis.json` | ordered Pi-ready speech/image sections |
 | `chapters.json` | rendered paragraph/chapter structure |
-| `<summary>.md` | readable full transcript plus OCR-derived visual context; the filename and heading are a short summary of the transcript |
+| `<summary>.md` | readable full transcript plus OCR notes and the selected screenshots they describe; the filename and heading are a short summary of the transcript |
 | `pi-analysis/section-*.json` | resumable Pi section checkpoints |
 | `pi-analysis/run.json` | selected model and aggregate token/cost usage |
 | `<summary>.md` | final multimodal meeting report; the filename is a short subject summary, and useful screenshots are embedded with relative links |
