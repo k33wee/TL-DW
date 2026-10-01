@@ -17,6 +17,7 @@ from tl_dw.local_video_to_doc.media import (
     build_audio_extraction_command,
     build_initial_prompt,
     choose_transcription_chapters,
+    summary_markdown_path,
 )
 from tl_dw.local_video_to_doc.models import (
     FrameObservation,
@@ -26,6 +27,7 @@ from tl_dw.local_video_to_doc.models import (
 )
 from tl_dw.local_video_to_doc.ocr_worker import _serializable_result
 from tl_dw.local_video_to_doc.transcription import resolve_runtime_settings
+from tl_dw.local_video_to_doc.text_utils import build_summary_title
 from tl_dw.local_video_to_doc import (
     Paragraph,
     RenderedChapter,
@@ -117,6 +119,73 @@ def test_initial_prompt_ignores_opaque_recording_name_but_keeps_real_titles() ->
     assert descriptive == "Quarterly Planning"
     assert embedded == "Quarterly planning"
     assert override == "tariff scaleId"
+
+
+def test_summary_title_uses_recurring_topic_instead_of_filename() -> None:
+    texts = [
+        "Allora, buongiorno a tutti.",
+        "Oggi parliamo delle scale tariffarie legacy e della modalita griglia.",
+        "La scala chilometrica non puo essere normalizzata sul contratto.",
+        "Poi c'e un errore nel caricamento.",
+        "Le scale tariffarie legacy restano legate al contratto e alla modalita griglia.",
+    ]
+
+    title = build_summary_title(
+        texts,
+        fallback="Screen Recording 2026-10-01 at 11.55.49",
+    )
+
+    assert "tariffarie" in title.lower()
+    assert "griglia" in title.lower()
+    assert not title.lower().startswith("allora")
+    assert not title.lower().startswith("oggi")
+    assert "screen recording" not in title.lower()
+    assert len(title) <= 90
+
+
+def test_summary_title_prefers_recurring_topics_over_a_spoken_fragment() -> None:
+    texts = [
+        "Questi due campi sono il service type e il track e devono puntare alla stessa cosa.",
+        "Il service type bianco diventa tracking e anche invoicing segue lo stesso track.",
+        "Poi il problema delle scale sulla tariffa reale: la scala chilometrica sembra fixed.",
+        "Le scale della tariffa non dicono quale size caricare.",
+        "Ci sono tre scale in una tariffa real e non viene detto quale e da gestire.",
+        "Il frontend e il backend devono salvare la scala scelta sulla tariffa.",
+    ] * 3
+
+    title = build_summary_title(texts, fallback="Screen Recording")
+
+    lowered = title.lower()
+    assert "service type" in lowered
+    assert "scale" in lowered or "scala" in lowered
+    assert "tariff" in lowered
+    assert "non viene detto" not in lowered
+    assert len(title) <= 90
+
+
+def test_summary_title_falls_back_when_transcript_has_no_topic() -> None:
+    assert build_summary_title([], "Quarterly planning") == "Quarterly planning"
+    assert build_summary_title(["Ok.", "Ciao a tutti."], "Fallback meeting") == (
+        "Fallback meeting"
+    )
+
+
+def test_summary_markdown_path_names_default_file_and_keeps_explicit_path() -> None:
+    artifact_dir = Path("output/meeting")
+
+    generated = summary_markdown_path(
+        artifact_dir / "document.md",
+        artifact_dir,
+        "Scale tariffarie legacy e modalita griglia",
+    )
+    explicit = summary_markdown_path(
+        Path("notes/custom-name.md"),
+        artifact_dir,
+        "Scale tariffarie legacy e modalita griglia",
+    )
+
+    assert generated == artifact_dir / "scale-tariffarie-legacy-e-modalita-griglia.md"
+    assert explicit == Path("notes/custom-name.md")
 
 
 def test_align_paragraphs_to_timestamps_preserves_start_times() -> None:

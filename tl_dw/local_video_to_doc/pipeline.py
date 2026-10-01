@@ -16,7 +16,9 @@ from .media import (
     ffprobe_metadata,
     media_info_from_metadata,
     resolve_output_paths,
+    summary_markdown_path,
 )
+from .text_utils import build_summary_title
 from .models import FrameObservation, VisualNote
 from .rendering import render_markdown, save_rendered_chapters
 from .transcription import save_transcript, transcribe_media
@@ -106,6 +108,44 @@ def process_video(
     )
     _write_json(output_paths.artifact_dir / "transcript_info.json", transcript_info)
 
+    log("  - Segmenting the transcript into readable paragraphs")
+    rendered_chapters = build_document_chapters(
+        transcript_chapters=transcript_chapters,
+        sat_model=sat_model,
+        use_source_chapters=use_source_chapters,
+        segment_unchaptered=args.segment_unchaptered,
+        max_generated_chapter_seconds=args.max_generated_chapter_seconds,
+        min_generated_chapter_gap=args.min_generated_chapter_gap,
+    )
+    rendered_chapters = attach_visual_notes_to_chapters(
+        rendered_chapters, visual_notes
+    )
+    save_rendered_chapters(rendered_chapters, output_paths.artifact_dir)
+
+    summary_title = build_summary_title(
+        [
+            paragraph.text
+            for chapter in rendered_chapters
+            for paragraph in chapter.paragraphs
+        ],
+        fallback=media_info.title,
+    )
+    document_path = summary_markdown_path(
+        output_paths.document_path,
+        output_paths.artifact_dir,
+        summary_title,
+    )
+    markdown = render_markdown(
+        title=summary_title,
+        source_path=media_info.source_path,
+        chapters=rendered_chapters,
+        timestamp_paragraphs=args.timestamp_paragraphs,
+        add_table_of_contents=args.add_table_of_contents,
+    )
+    document_path.parent.mkdir(parents=True, exist_ok=True)
+    document_path.write_text(markdown, encoding="utf-8")
+    log(f"  - Wrote transcript document: {document_path}")
+
     log("  - Writing ordered multimodal analysis bundle")
     write_analysis_bundle(
         output_paths.artifact_dir / "analysis.json",
@@ -122,32 +162,9 @@ def process_video(
             "max_frames_per_section": args.max_frames_per_section,
             "ocr_enabled": args.use_ocr and args.use_frames,
         },
-        document_path=output_paths.document_path,
+        document_path=document_path,
+        title=summary_title,
     )
-
-    log("  - Segmenting the transcript into readable paragraphs")
-    rendered_chapters = build_document_chapters(
-        transcript_chapters=transcript_chapters,
-        sat_model=sat_model,
-        use_source_chapters=use_source_chapters,
-        segment_unchaptered=args.segment_unchaptered,
-        max_generated_chapter_seconds=args.max_generated_chapter_seconds,
-        min_generated_chapter_gap=args.min_generated_chapter_gap,
-    )
-    rendered_chapters = attach_visual_notes_to_chapters(
-        rendered_chapters, visual_notes
-    )
-    save_rendered_chapters(rendered_chapters, output_paths.artifact_dir)
-
-    markdown = render_markdown(
-        title=media_info.title,
-        source_path=media_info.source_path,
-        chapters=rendered_chapters,
-        timestamp_paragraphs=args.timestamp_paragraphs,
-        add_table_of_contents=args.add_table_of_contents,
-    )
-    output_paths.document_path.write_text(markdown, encoding="utf-8")
-    log(f"  - Wrote transcript document: {output_paths.document_path}")
     log(f"  - Pi bundle: {output_paths.artifact_dir / 'analysis.json'}")
 
 

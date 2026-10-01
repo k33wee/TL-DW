@@ -266,6 +266,18 @@ def resolve_output_paths(
     return OutputPaths(artifact_dir=artifact_dir, document_path=document_path)
 
 
+def summary_markdown_path(
+    current_path: Path,
+    artifact_dir: Path,
+    summary_title: str,
+) -> Path:
+    """Keep an explicit Markdown path; otherwise name the file from its summary."""
+    if current_path.name != "document.md":
+        return current_path
+    slug = safe_slug(summary_title)[:80].strip("-") or "document"
+    return artifact_dir / f"{slug}.md"
+
+
 def resolve_videos(video_path: Path | None, video_dir: Path) -> list[Path]:
     if video_path is not None:
         candidate = video_path.expanduser().resolve()

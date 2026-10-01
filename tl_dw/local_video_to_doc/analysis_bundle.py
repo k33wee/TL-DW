@@ -9,6 +9,7 @@ from typing import Any, Sequence
 from tl_dw.common.time_utils import sec_to_hhmmss
 
 from .models import FrameObservation, MediaInfo, TranscriptChapter
+from .text_utils import normalize_whitespace
 
 
 ANALYSIS_SCHEMA_VERSION = 1
@@ -113,6 +114,7 @@ def write_analysis_bundle(
     section_seconds: float,
     settings: dict[str, Any],
     document_path: Path | None = None,
+    title: str | None = None,
 ) -> dict[str, Any]:
     sections = build_analysis_sections(
         transcript_chapters,
@@ -126,7 +128,7 @@ def write_analysis_bundle(
     payload: dict[str, Any] = {
         "schema_version": ANALYSIS_SCHEMA_VERSION,
         "kind": "tl-dw-meeting-analysis",
-        "title": media_info.title,
+        "title": normalize_whitespace(title or "") or media_info.title,
         "source": {
             "path": str(media_info.source_path),
             "duration": media_info.duration,

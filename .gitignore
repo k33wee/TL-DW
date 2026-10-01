@@ -3,6 +3,7 @@
 .DS_Store
 **/.DS_Store
 /ScreenRec-*.mp4
+/Screen Recording *.mov
 __pycache__
 *.pyc
 *.pyo

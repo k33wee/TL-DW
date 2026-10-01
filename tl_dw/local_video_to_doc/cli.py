@@ -317,7 +317,7 @@ def _add_frame_args(parser: argparse.ArgumentParser) -> None:
         "--ocr-dedupe-window-sec",
         type=float,
         default=float(os.getenv("EXTRACTION_OCR_DEDUPE_WINDOW_SEC", "45")),
-        help="Window for suppressing repeated OCR notes in document.md.",
+        help="Window for suppressing repeated OCR notes in the transcript Markdown.",
     )
 
 

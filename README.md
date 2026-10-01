@@ -41,7 +41,7 @@ The project extension at `.pi/extensions/tl-dw.ts` registers `/tl-dw-analyze`. I
 - sends at most the selected frames for the current section;
 - checkpoints each section so interrupted work can resume without repaying completed calls;
 - performs a final text-only synthesis;
-- writes `meeting-analysis.md` and usage metadata.
+- writes the report as `<summary>.md`, named from its subject, plus usage metadata.
 
 ## Requirements
 
@@ -195,10 +195,10 @@ By default, artifacts are stored in `output/<video-slug>/`:
 | `visual_notes.json` | deduplicated OCR notes for the transcript document |
 | `analysis.json` | ordered Pi-ready speech/image sections |
 | `chapters.json` | rendered paragraph/chapter structure |
-| `document.md` | readable full transcript plus OCR-derived visual context |
+| `<summary>.md` | readable full transcript plus OCR-derived visual context; the filename and heading are a short summary of the transcript |
 | `pi-analysis/section-*.json` | resumable Pi section checkpoints |
 | `pi-analysis/run.json` | selected model and aggregate token/cost usage |
-| `meeting-analysis.md` | final multimodal meeting report |
+| `<summary>.md` | final multimodal meeting report; the filename is a short subject summary, and useful screenshots are embedded with relative links |
 
 ## Quality and cost choices
 
