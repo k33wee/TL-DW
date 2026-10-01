@@ -44,6 +44,18 @@ class VisualNote:
     text: str
     lines: list[str]
     confidence: float
+    image_path: str | None = None
+
+
+@dataclass
+class FrameObservation:
+    timestamp: float
+    image_path: str
+    change_score: float
+    reasons: list[str]
+    ocr_text: str = ""
+    ocr_lines: list[str] = field(default_factory=list)
+    ocr_confidence: float | None = None
 
 
 @dataclass

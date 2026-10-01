@@ -73,6 +73,7 @@ def save_rendered_chapters(
                     "text": note.text,
                     "lines": note.lines,
                     "confidence": note.confidence,
+                    "image_path": note.image_path,
                 }
                 for note in chapter.visual_notes
             ],

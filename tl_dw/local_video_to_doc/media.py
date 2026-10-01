@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -9,6 +10,12 @@ from tl_dw.common.process import run_command
 
 from .models import MediaChapter, MediaInfo, OutputPaths
 from .text_utils import normalize_whitespace, safe_slug
+
+
+DEFAULT_NORMALIZATION_FILTER = (
+    "highpass=f=80,dynaudnorm=f=250:g=15:p=0.95,"
+    "loudnorm=I=-16:TP=-1.5:LRA=11"
+)
 
 
 def ffprobe_metadata(video_path: Path) -> dict[str, Any]:
@@ -74,24 +81,52 @@ def media_info_from_metadata(video_path: Path, metadata: dict[str, Any]) -> Medi
     )
 
 
-def extract_audio(video_path: Path, wav_out: Path) -> None:
+def build_audio_extraction_command(
+    video_path: Path,
+    wav_out: Path,
+    *,
+    normalize_audio: bool,
+    normalization_filter: str,
+) -> list[str]:
+    command = [
+        "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(video_path),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+    ]
+    if normalize_audio:
+        command.extend(["-af", normalization_filter])
+    command.extend(["-c:a", "pcm_s16le", "-f", "wav", str(wav_out)])
+    return command
+
+
+def extract_audio(
+    video_path: Path,
+    wav_out: Path,
+    *,
+    normalize_audio: bool = True,
+    normalization_filter: str = DEFAULT_NORMALIZATION_FILTER,
+) -> None:
     wav_out.parent.mkdir(parents=True, exist_ok=True)
     run_command(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(video_path),
-            "-vn",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-acodec",
-            "pcm_s16le",
-            str(wav_out),
-        ]
+        build_audio_extraction_command(
+            video_path,
+            wav_out,
+            normalize_audio=normalize_audio,
+            normalization_filter=normalization_filter,
+        )
     )
+    if not wav_out.exists():
+        raise RuntimeError(f"FFmpeg did not create the extracted audio file: {wav_out}")
 
 
 def extract_audio_chunk(
@@ -100,6 +135,10 @@ def extract_audio_chunk(
     run_command(
         [
             "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
             "-y",
             "-ss",
             f"{start:.3f}",
@@ -118,12 +157,17 @@ def build_initial_prompt(
     title: str,
     chapters: Sequence[MediaChapter],
     override: str | None = None,
+    *,
+    source_name: str | None = None,
 ) -> str | None:
     if override:
         cleaned = normalize_whitespace(override)
         return cleaned or None
 
-    parts = [normalize_whitespace(title)]
+    parts: list[str] = []
+    cleaned_title = normalize_whitespace(title)
+    if cleaned_title and not _title_is_opaque_source_name(cleaned_title, source_name):
+        parts.append(cleaned_title)
     chapter_titles = [
         normalize_whitespace(chapter.title)
         for chapter in chapters
@@ -137,15 +181,61 @@ def build_initial_prompt(
     return prompt or None
 
 
+def _title_is_opaque_source_name(title: str, source_name: str | None) -> bool:
+    """Ignore generated recording names such as ScreenRec timestamps.
+
+    A descriptive filename can still provide useful vocabulary. A name that is
+    only a product stamp plus a date tends to be echoed by the ASR model.
+    """
+    if source_name is None:
+        return False
+    stem = Path(source_name).stem
+
+    def fold(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+    if fold(title) != fold(stem):
+        return False
+    words = re.findall(r"[A-Za-z]{3,}", title)
+    return len(words) < 2 or re.search(r"\d{4}", title) is not None
+
+
 def choose_transcription_chapters(
     media_info: MediaInfo,
     ignore_source_chapters: bool,
 ) -> tuple[list[MediaChapter], bool]:
     if media_info.chapters and not ignore_source_chapters:
-        return media_info.chapters, True
+        return _cover_media_with_chapters(media_info.chapters, media_info.duration), True
 
     end = media_info.duration if media_info.duration > 0 else 0.0
     return [MediaChapter(title="Transcript", start=0.0, end=end)], False
+
+
+def _cover_media_with_chapters(
+    chapters: Sequence[MediaChapter], duration: float
+) -> list[MediaChapter]:
+    """Keep chapter labels without dropping or double-transcribing uncovered time."""
+    covered: list[MediaChapter] = []
+    cursor = 0.0
+    for chapter in sorted(chapters, key=lambda item: item.start):
+        start = max(0.0, chapter.start)
+        end = min(chapter.end, duration) if duration > 0 else chapter.end
+        if start > cursor + 0.001:
+            covered.append(MediaChapter(title="Transcript", start=cursor, end=start))
+        effective_start = max(start, cursor)
+        if end > effective_start:
+            covered.append(
+                MediaChapter(
+                    title=chapter.title,
+                    start=effective_start,
+                    end=end,
+                )
+            )
+            cursor = end
+
+    if duration > cursor + 0.001:
+        covered.append(MediaChapter(title="Transcript", start=cursor, end=duration))
+    return covered or [MediaChapter(title="Transcript", start=0.0, end=max(0.0, duration))]
 
 
 def resolve_output_paths(

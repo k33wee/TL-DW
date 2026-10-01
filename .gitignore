@@ -1,5 +1,8 @@
 .git
 .github/instructions/
+.DS_Store
+**/.DS_Store
+/ScreenRec-*.mp4
 __pycache__
 *.pyc
 *.pyo

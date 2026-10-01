@@ -3,7 +3,29 @@ from __future__ import annotations
 from argparse import Namespace
 from pathlib import Path
 
-from tl_dw.local_video_to_doc.cli import _resolve_runtime_args
+from PIL import Image
+
+from tl_dw.local_video_to_doc.analysis_bundle import build_analysis_sections
+from tl_dw.local_video_to_doc.cli import _resolve_runtime_args, build_parser
+from tl_dw.local_video_to_doc.frames import (
+    SampledFrame,
+    _materialize_selected_frames,
+    frame_change_score,
+    select_sampled_frames,
+)
+from tl_dw.local_video_to_doc.media import (
+    build_audio_extraction_command,
+    build_initial_prompt,
+    choose_transcription_chapters,
+)
+from tl_dw.local_video_to_doc.models import (
+    FrameObservation,
+    MediaChapter,
+    MediaInfo,
+    TranscriptChapter,
+)
+from tl_dw.local_video_to_doc.ocr_worker import _serializable_result
+from tl_dw.local_video_to_doc.transcription import resolve_runtime_settings
 from tl_dw.local_video_to_doc import (
     Paragraph,
     RenderedChapter,
@@ -37,6 +59,64 @@ def test_extract_source_chapters_skips_invalid_ranges() -> None:
         ("Intro", 0.0, 30.0),
         ("Chapter 3", 60.0, 90.0),
     ]
+
+
+def test_transcription_chapters_cover_gaps_without_overlap() -> None:
+    media_info = MediaInfo(
+        title="Meeting",
+        duration=40.0,
+        chapters=[
+            MediaChapter(title="Intro", start=10.0, end=22.0),
+            MediaChapter(title="Details", start=20.0, end=30.0),
+        ],
+        source_path=Path("meeting.mp4"),
+    )
+
+    chapters, used_source_chapters = choose_transcription_chapters(
+        media_info, ignore_source_chapters=False
+    )
+
+    assert used_source_chapters is True
+    assert [(chapter.title, chapter.start, chapter.end) for chapter in chapters] == [
+        ("Transcript", 0.0, 10.0),
+        ("Intro", 10.0, 22.0),
+        ("Details", 22.0, 30.0),
+        ("Transcript", 30.0, 40.0),
+    ]
+
+
+def test_initial_prompt_ignores_opaque_recording_name_but_keeps_real_titles() -> None:
+    chapters = [
+        MediaChapter(title="Transcript", start=0.0, end=10.0),
+        MediaChapter(title="Budget review", start=10.0, end=20.0),
+    ]
+
+    generated = build_initial_prompt(
+        "ScreenRec-2026-09-30-16.04.32",
+        chapters,
+        source_name="ScreenRec-2026-09-30-16.04.32.mp4",
+    )
+    descriptive = build_initial_prompt(
+        "Quarterly Planning",
+        [],
+        source_name="Quarterly_Planning.mp4",
+    )
+    embedded = build_initial_prompt(
+        "Quarterly planning",
+        [],
+        source_name="recording.mp4",
+    )
+    override = build_initial_prompt(
+        "ScreenRec-2026-09-30-16.04.32",
+        [],
+        "  tariff scaleId  ",
+        source_name="ScreenRec-2026-09-30-16.04.32.mp4",
+    )
+
+    assert generated == "Budget review"
+    assert descriptive == "Quarterly Planning"
+    assert embedded == "Quarterly planning"
+    assert override == "tariff scaleId"
 
 
 def test_align_paragraphs_to_timestamps_preserves_start_times() -> None:
@@ -178,3 +258,185 @@ def test_resolve_runtime_args_maps_gpu_to_cuda_defaults() -> None:
 
     assert args.whisper_device == "cuda"
     assert args.whisper_compute_type == "int8_float16"
+
+
+def test_cli_quality_defaults_enable_large_model_normalization_and_frames(
+    monkeypatch,
+) -> None:
+    for name in [
+        "EXTRACTION_WHISPER_MODEL",
+        "EXTRACTION_NORMALIZE_AUDIO",
+        "EXTRACTION_DISABLE_FRAMES",
+        "EXTRACTION_DISABLE_OCR",
+        "EXTRACTION_SECTION_SECONDS",
+        "EXTRACTION_MAX_FRAMES_PER_SECTION",
+        "EXTRACTION_SAT_MODEL",
+    ]:
+        monkeypatch.delenv(name, raising=False)
+    args = build_parser().parse_args(["--video", "meeting.mp4"])
+
+    assert args.whisper_model == "large-v3"
+    assert args.normalize_audio is True
+    assert args.use_frames is True
+    assert args.use_ocr is True
+    assert args.section_seconds == 120
+    assert args.max_frames_per_section == 4
+    assert args.sat_model == "simple"
+
+
+def test_audio_extraction_command_applies_merged_normalization_filter() -> None:
+    command = build_audio_extraction_command(
+        Path("meeting.mp4"),
+        Path("audio.wav"),
+        normalize_audio=True,
+        normalization_filter="highpass=f=80,loudnorm=I=-16",
+    )
+
+    assert command[:6] == [
+        "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+    ]
+    assert command[command.index("-af") + 1] == "highpass=f=80,loudnorm=I=-16"
+    assert command[-5:] == [
+        "-c:a",
+        "pcm_s16le",
+        "-f",
+        "wav",
+        "audio.wav",
+    ]
+
+
+def test_audio_extraction_command_can_preserve_clean_source_audio() -> None:
+    command = build_audio_extraction_command(
+        Path("meeting.mp4"),
+        Path("audio.wav"),
+        normalize_audio=False,
+        normalization_filter="unused",
+    )
+
+    assert "-af" not in command
+    assert command[command.index("-ac") + 1] == "1"
+    assert command[command.index("-ar") + 1] == "16000"
+
+
+def test_runtime_profiles_include_macbook_and_pascal_safe_defaults() -> None:
+    macbook = resolve_runtime_settings("macbook")
+    pascal = resolve_runtime_settings("cuda-pascal")
+
+    assert (macbook.device, macbook.compute_type) == ("cpu", "int8")
+    assert (pascal.device, pascal.compute_type) == ("cuda", "int8")
+
+
+def test_frame_change_score_detects_a_screen_transition() -> None:
+    black = Image.new("L", (256, 144), color=0)
+    white = Image.new("L", (256, 144), color=255)
+
+    assert frame_change_score(black, black) == 0
+    assert frame_change_score(black, white) > 0.5
+
+
+def test_frame_selection_keeps_section_anchors_and_strong_changes() -> None:
+    sampled = [
+        SampledFrame(0.0, Path("0.jpg"), 0.0),
+        SampledFrame(5.0, Path("5.jpg"), 0.001),
+        SampledFrame(30.0, Path("30.jpg"), 0.25),
+        SampledFrame(90.0, Path("90.jpg"), 0.08),
+        SampledFrame(120.0, Path("120.jpg"), 0.01),
+        SampledFrame(180.0, Path("180.jpg"), 0.3),
+    ]
+
+    selected = select_sampled_frames(
+        sampled,
+        media_duration=240.0,
+        section_sec=120.0,
+        max_frames_per_section=3,
+        min_change_score=0.015,
+        min_spacing_sec=5.0,
+    )
+
+    assert [frame.timestamp for frame, _ in selected] == [0.0, 30.0, 90.0, 120.0, 180.0]
+    assert selected[0][1] == ["section-anchor"]
+    assert "scene-change" in selected[1][1]
+    assert "section-anchor" in selected[3][1]
+
+
+def test_frame_is_kept_when_optional_ocr_fails(tmp_path) -> None:
+    source = tmp_path / "sample.jpg"
+    Image.new("RGB", (32, 18), color="white").save(source)
+    artifact_dir = tmp_path / "artifacts"
+    frames_dir = artifact_dir / "frames"
+    frames_dir.mkdir(parents=True)
+    messages: list[str] = []
+
+    def failing_ocr(_path):
+        raise RuntimeError("synthetic OCR failure")
+
+    observations, notes, rows = _materialize_selected_frames(
+        selected=[(SampledFrame(5.0, source, 0.2), ["scene-change"])],
+        frames_dir=frames_dir,
+        artifact_dir=artifact_dir,
+        ocr_engine=failing_ocr,
+        ocr_min_score=0.5,
+        ocr_min_chars=3,
+        ocr_max_lines=3,
+        ocr_max_note_chars=100,
+        verbose_logger=messages.append,
+    )
+
+    assert len(observations) == 1
+    assert (artifact_dir / observations[0].image_path).is_file()
+    assert observations[0].ocr_text == ""
+    assert notes == []
+    assert rows[0]["raw_lines"] == []
+    assert any("keeping the frame without OCR" in message for message in messages)
+
+
+def test_ocr_worker_discards_nonserializable_boxes() -> None:
+    result = _serializable_result(
+        [
+            [[[0, 0], [1, 1]], "Visible text", 0.95],
+            [None, "Second line", 0.75],
+        ]
+    )
+
+    assert result == [
+        [None, "Visible text", 0.95],
+        [None, "Second line", 0.75],
+    ]
+
+
+def test_analysis_sections_align_transcript_and_images_without_loss() -> None:
+    transcript = [
+        TranscriptChapter(
+            title="Meeting",
+            segments=[
+                TranscriptSegment(0.0, 10.0, " Opening"),
+                TranscriptSegment(119.0, 121.0, " Boundary topic"),
+                TranscriptSegment(200.0, 210.0, " Follow-up"),
+            ],
+        )
+    ]
+    frames = [
+        FrameObservation(0.0, "frames/a.jpg", 0.0, ["section-anchor"]),
+        FrameObservation(120.0, "frames/b.jpg", 0.2, ["scene-change"]),
+    ]
+
+    sections = build_analysis_sections(
+        transcript,
+        frames,
+        media_duration=240.0,
+        section_seconds=120.0,
+    )
+
+    assert len(sections) == 2
+    assert [row["text"] for row in sections[0]["transcript"]] == ["Opening"]
+    assert [row["text"] for row in sections[1]["transcript"]] == [
+        "Boundary topic",
+        "Follow-up",
+    ]
+    assert sections[0]["frames"][0]["image_path"] == "frames/a.jpg"
+    assert sections[1]["frames"][0]["image_path"] == "frames/b.jpg"

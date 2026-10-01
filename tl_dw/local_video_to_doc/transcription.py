@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import platform
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -13,17 +15,115 @@ from .models import MediaChapter, TranscriptChapter, TranscriptSegment
 from .text_utils import normalize_segment_text
 
 
-def load_whisper_model(model_name: str, device: str, compute_type: str) -> Any:
+DEFAULT_CPU_COMPUTE_TYPE = "int8"
+DEFAULT_PASCAL_CUDA_COMPUTE_TYPE = "int8"
+DEFAULT_MODERN_CUDA_COMPUTE_TYPE = "float16"
+HARDWARE_PROFILE_CHOICES = (
+    "auto",
+    "cpu",
+    "macbook",
+    "cuda-pascal",
+    "cuda-modern",
+)
+CUDA_FALLBACK_COMPUTE_TYPES = (
+    "int8",
+    "int8_float32",
+    "float32",
+    "auto",
+    "default",
+    "int8_float16",
+    "float16",
+)
+
+
+@dataclass(frozen=True)
+class RuntimeSettings:
+    device: str
+    compute_type: str
+    reason: str
+
+
+def get_cuda_device_count() -> int:
+    try:
+        import ctranslate2
+    except Exception:  # pragma: no cover - depends on the local runtime
+        return 0
+
+    try:
+        return int(ctranslate2.get_cuda_device_count())
+    except Exception:  # pragma: no cover - depends on CUDA libraries and drivers
+        return 0
+
+
+def resolve_runtime_settings(hardware_profile: str) -> RuntimeSettings:
+    if hardware_profile == "macbook":
+        return RuntimeSettings(
+            device="cpu",
+            compute_type=DEFAULT_CPU_COMPUTE_TYPE,
+            reason="MacBook profile uses CTranslate2 CPU with INT8 quantization",
+        )
+    if hardware_profile == "cpu":
+        return RuntimeSettings(
+            device="cpu",
+            compute_type=DEFAULT_CPU_COMPUTE_TYPE,
+            reason="CPU profile uses INT8 quantization",
+        )
+    if hardware_profile == "cuda-pascal":
+        return RuntimeSettings(
+            device="cuda",
+            compute_type=DEFAULT_PASCAL_CUDA_COMPUTE_TYPE,
+            reason="Pascal CUDA profile uses INT8 for GTX 10-series compatibility",
+        )
+    if hardware_profile == "cuda-modern":
+        return RuntimeSettings(
+            device="cuda",
+            compute_type=DEFAULT_MODERN_CUDA_COMPUTE_TYPE,
+            reason="modern CUDA profile uses FP16",
+        )
+    if hardware_profile != "auto":
+        raise ValueError(f"Unknown hardware profile: {hardware_profile}")
+
+    if platform.system().lower() == "darwin":
+        return RuntimeSettings(
+            device="cpu",
+            compute_type=DEFAULT_CPU_COMPUTE_TYPE,
+            reason="auto detected macOS and selected CPU INT8",
+        )
+    if get_cuda_device_count() > 0:
+        return RuntimeSettings(
+            device="cuda",
+            compute_type=DEFAULT_PASCAL_CUDA_COMPUTE_TYPE,
+            reason="auto detected CUDA and selected broadly compatible INT8",
+        )
+    return RuntimeSettings(
+        device="cpu",
+        compute_type=DEFAULT_CPU_COMPUTE_TYPE,
+        reason="auto did not detect CUDA and selected CPU INT8",
+    )
+
+
+def load_whisper_model(
+    model_name: str,
+    device: str,
+    compute_type: str,
+    *,
+    local_files_only: bool = False,
+) -> Any:
     try:
         from faster_whisper import WhisperModel
     except ImportError as exc:  # pragma: no cover
         raise SystemExit(
-            "Missing dependency 'faster-whisper'. Install extraction dependencies before running this module."
+            "Missing dependency 'faster-whisper'. Install project dependencies before running transcription."
         ) from exc
 
     try:
-        return WhisperModel(model_name, device=device, compute_type=compute_type)
-    except ValueError as exc:
+        return WhisperModel(
+            model_name,
+            device=device,
+            compute_type=compute_type,
+            local_files_only=local_files_only,
+        )
+    except (RuntimeError, ValueError) as exc:
         if device != "cuda":
             raise
         return _retry_cuda_model_load(
@@ -31,6 +131,7 @@ def load_whisper_model(model_name: str, device: str, compute_type: str) -> Any:
             model_name=model_name,
             requested_compute_type=compute_type,
             original_error=exc,
+            local_files_only=local_files_only,
         )
 
 
@@ -38,25 +139,33 @@ def _retry_cuda_model_load(
     whisper_model_cls: Any,
     model_name: str,
     requested_compute_type: str,
-    original_error: ValueError,
+    original_error: Exception,
+    *,
+    local_files_only: bool,
 ) -> Any:
-    fallback_types = [
-        compute_type
-        for compute_type in ["int8", "float16", "default"]
-        if compute_type != requested_compute_type
-    ]
-    for compute_type in fallback_types:
+    last_error = original_error
+    for compute_type in CUDA_FALLBACK_COMPUTE_TYPES:
+        if compute_type == requested_compute_type:
+            continue
         try:
             log(
                 "Requested CUDA compute type was not supported, "
                 f"retrying with '{compute_type}'."
             )
             return whisper_model_cls(
-                model_name, device="cuda", compute_type=compute_type
+                model_name,
+                device="cuda",
+                compute_type=compute_type,
+                local_files_only=local_files_only,
             )
-        except ValueError:
-            continue
-    raise original_error
+        except (RuntimeError, ValueError) as exc:
+            last_error = exc
+
+    raise RuntimeError(
+        "Unable to load Whisper on CUDA after trying compatible compute types. "
+        "For Pascal GPUs use --hardware-profile cuda-pascal and ensure CUDA 12 "
+        f"cuBLAS plus cuDNN 9 are available. Last error: {last_error}"
+    ) from last_error
 
 
 def transcribe_media(
@@ -67,6 +176,9 @@ def transcribe_media(
     requested_language: str | None,
     initial_prompt: str | None,
     verbose_logger: callable,
+    *,
+    beam_size: int = 5,
+    vad_filter: bool = True,
 ) -> tuple[list[TranscriptChapter], dict[str, Any]]:
     transcript_chapters: list[TranscriptChapter] = []
     detected_language = requested_language
@@ -83,7 +195,10 @@ def transcribe_media(
             use_full_audio = (
                 len(chapters) == 1
                 and chapter.start <= 0.001
-                and (media_duration <= 0.0 or abs(chapter.end - media_duration) <= 0.5)
+                and (
+                    media_duration <= 0.0
+                    or abs(chapter.end - media_duration) <= 0.5
+                )
             )
 
             chapter_audio_path = audio_path
@@ -93,7 +208,11 @@ def transcribe_media(
                     audio_path, chapter_audio_path, chapter.start, chapter_duration
                 )
 
-            kwargs: dict[str, Any] = {"beam_size": 5, "vad_filter": True}
+            kwargs: dict[str, Any] = {
+                "beam_size": beam_size,
+                "task": "transcribe",
+                "vad_filter": vad_filter,
+            }
             runtime_language = requested_language or detected_language
             if runtime_language:
                 kwargs["language"] = runtime_language
@@ -139,6 +258,8 @@ def transcribe_media(
         "requested_language": requested_language,
         "detected_language": detected_language,
         "initial_prompt": initial_prompt,
+        "beam_size": beam_size,
+        "vad_filter": vad_filter,
         "chapters": chapter_info,
     }
 
@@ -170,4 +291,7 @@ def save_transcript(
                 )
 
     transcript_path = output_dir / "transcript.txt"
-    transcript_path.write_text("\n".join(transcript_lines), encoding="utf-8")
+    transcript_path.write_text(
+        "\n".join(transcript_lines) + ("\n" if transcript_lines else ""),
+        encoding="utf-8",
+    )
