@@ -1,10 +1,12 @@
 ---
 name: tl-dw
 description: Turn a local meeting video into a timestamped transcript, evidence-based summary or operational plan, with optional context documents and diagrams. Use for transcription, call analysis, decisions, action items or planning from a recording or an existing TL-DW bundle.
-compatibility: Requires uv, ffmpeg/ffprobe, the TL-DW local Pi package, and an authenticated image-capable Pi model.
+compatibility: Requires Python 3.13, uv, ffmpeg/ffprobe, the TL-DW Pi package installed from Git or a checkout, and an authenticated image-capable Pi model.
 ---
 
 # TL-DW video summary
+
+This skill and its tools are versioned TL-DW package resources, not personal Pi configuration. See [installation and development](../../../README.md) for reproducible setup. Use the package-relative resources; do not assume a maintainer's checkout path, global module installation, model alias, memory adapter or credentials.
 
 Use `tl_dw_video` for a recording and `tl_dw_analyze` for an existing `analysis.json` or artifact directory. Local preparation probes media, checks disk space, selects audio conservatively, transcribes and extracts frames/OCR. Explicit document attachments are converted locally with embedded raster figures. Model analysis sends bounded evidence to the selected provider.
 

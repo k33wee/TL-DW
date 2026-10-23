@@ -1,4 +1,4 @@
-import { afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { unlinkSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -6,16 +6,13 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import type { Api, Model, Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-// Pi supplies these peers at runtime. Resolve the installed host for tests too,
-// without installing a second physical copy/registry in this local package.
-const hostRoot = process.env.NODE_PATH?.split(path.delimiter).find(Boolean);
-for (const name of ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent"]) {
-	const packageRoot = hostRoot ? path.join(hostRoot, name) : undefined;
-	const metadata = packageRoot ? JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8")) : undefined;
-	const host = await import(packageRoot ? path.resolve(packageRoot, metadata.main) : import.meta.resolve(name));
-	mock.module(name, () => host);
-}
-const { default: tlDwExtension, analyzeBundle, enforceAnalysisLimits, loadDocumentContext, parseArguments, retainAllowedScreenshots } = await import("../.pi/extensions/tl-dw");
+import tlDwExtension, {
+	analyzeBundle,
+	enforceAnalysisLimits,
+	loadDocumentContext,
+	parseArguments,
+	retainAllowedScreenshots,
+} from "../.pi/extensions/tl-dw";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });

@@ -3,17 +3,38 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
+  "description": "Local meeting preparation and evidence-based Pi summaries/planning",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/k33wee/TL-DW.git"
+  },
+  "engines": {
+    "node": ">=22.19.0",
+    "bun": ">=1.4.4"
+  },
+  "packageManager": "npm@11.19.1",
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@types/bun": "1.4.4",
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  },
   "files": [
     ".pi/extensions",
     ".pi/skills",
     "tl_dw/**/*.py",
     "main.py",
     "pyproject.toml",
+    ".python-version",
     "uv.lock",
     "README.md"
   ],
   "scripts": {
-    "test:extension": "bun test tests/workflow.test.ts"
+    "test": "bun test tests",
+    "test:extension": "bun test tests/workflow.test.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm test"
   },
   "keywords": [
     "pi-package"

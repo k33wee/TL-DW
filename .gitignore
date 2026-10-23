@@ -21,8 +21,7 @@ test-video/
 # Personal Pi state/configuration is never part of the shared package.
 /.pi/memory/
 /.pi/local-memory/
-/.pi/settings.json
-/.pi/settings.local.json
+/.pi/*.json
 
 # Local dependencies, caches, reports and build output.
 /node_modules/

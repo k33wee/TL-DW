@@ -55,11 +55,13 @@ The analyzer:
 
 ## Requirements
 
-- Python 3.13+
-- [uv](https://docs.astral.sh/uv/)
+- Python 3.13 (selected by the versioned `.python-version`)
+- [uv](https://docs.astral.sh/uv/) 0.6.10+; CI pins 0.13.5
 - `ffmpeg` and `ffprobe` on `PATH`
-- Pi 1.3.0 or newer for the included skill and extension
+- Pi 1.4.0+ for analysis; an authenticated image-capable model chosen by each user
 - enough disk/RAM for the chosen Whisper model
+
+Development additionally requires Node.js 22.19+ and Bun 1.4.4+ (CI uses Node 24 and Bun 1.4.4). Python tests, extension tests and package-install smoke tests need **no model account, API keys, cached Whisper models or personal Pi installation/configuration**. Linux and macOS are covered by CI; Windows is not currently validated.
 
 On macOS:
 
@@ -69,19 +71,29 @@ brew install ffmpeg uv
 
 ## Install
 
-Install the Python environment:
+Install the shareable Pi package directly from Git:
 
 ```bash
-uv sync
+pi install git:github.com/k33wee/TL-DW
 ```
 
-Install this checkout as a personal Pi package so the skill, tool, and command are available from every working directory:
+Or clone the repository and prepare its locked Python environment:
+
+```bash
+git clone https://github.com/k33wee/TL-DW.git
+cd TL-DW
+uv sync --locked
+```
+
+Install this checkout as a Pi package so the skill, tool, and command are available from every working directory:
 
 ```bash
 pi install "$(pwd)"
 ```
 
-Pi loads the local checkout directly, so subsequent edits do not require reinstalling. Run `/reload` in an existing Pi session after changing the package.
+Pi loads a local checkout directly, so subsequent edits do not require reinstalling. Run `/reload` in an existing Pi session after changing the package. Authenticate to your own model provider with Pi's normal `/login`; no maintainer-specific model aliases, credentials or configuration files are shipped.
+
+The extension resolves its Python project relative to its own package file, not a fixed checkout path or the user's home directory. It invokes `uv run --locked --project ...`, so preparation also works when Pi starts in an unrelated directory. The skill, extension, Python sources, Python version and `uv.lock` are included in the distributable package.
 
 Optional NVIDIA runtime libraries:
 
@@ -237,7 +249,7 @@ For an already prepared bundle, use the lower-level command:
 You can pass either `analysis.json` or its artifact directory. Pi opens a picker containing configured image-capable models. Choose one explicitly with:
 
 ```text
-/tl-dw-analyze output/recording --model openai-codex/gpt-5.6-sol
+/tl-dw-analyze output/recording --model provider/model
 ```
 
 Re-running the same bundle/model reuses a completed report or section checkpoints. To intentionally pay for a fresh analysis:
@@ -298,14 +310,37 @@ The Python CLI stores artifacts in `output/<video-slug>/` by default. The global
 - Screen changes shorter than the frame scan interval can be missed. Lower `--frame-sample-sec` for rapidly changing demos.
 - Meeting analysis sends selected images and transcript text to the chosen model provider; review privacy requirements first.
 
-## Tests
+## Development and validation
+
+From a fresh checkout, with Node, Bun, uv and FFmpeg installed:
 
 ```bash
-uv run --extra dev pytest
-# Bun tests use the installed Pi host peers, with synthetic models (no paid calls).
-# If peers are installed globally, set NODE_PATH to the directory containing
-# @earendil-works/pi-ai and @earendil-works/pi-coding-agent.
-bun run test:extension
+npm ci --ignore-scripts --no-audit --no-fund
+uv sync --locked --extra dev
+
+npm run check                         # strict TypeScript, extension tests, Pi install/discovery smoke
+uv run --locked ruff check tl_dw tests scripts
+uv run --locked pytest -q             # synthetic media/documents, no real ASR/model downloads
 ```
 
-The tests cover actual FFmpeg duplicate/silent tracks and explicit mixing, resumable stage corruption/cancellation, Office text/tables/diagrams, unsafe archives, planning checkpoint reuse, per-model image limits, pre-spend ceilings and path confinement. Recordings are ignored by Git; Python/npm source packaging is allowlisted to exclude local recordings, output and private memory.
+`package-lock.json` pins JavaScript development dependencies, including the Pi SDK used by tests. There is no `NODE_PATH`, global module lookup or personal settings prerequisite. At runtime Pi supplies its own API peers; the test SDK is a **devDependency**, not a second bundled runtime host. `uv.lock` pins Python dependencies, and Ruff configuration is in `pyproject.toml` rather than a maintainer's home directory.
+
+The install smoke test invokes the real Pi CLI and resource loader with an empty temporary home, an unrelated working directory and no inherited credentials, settings or global extensions. It verifies discovery of both tools, the command and the skill without making model calls. Other tests use actual FFmpeg and local document conversion on synthetic inputs, with ASR/model responses mocked.
+
+Check the distributables too:
+
+```bash
+uv build --out-dir dist
+npm pack --ignore-scripts --pack-destination dist
+uv run --locked python scripts/check_distributions.py dist
+```
+
+The audit checks wheel/sdist/npm archives for required resources (including `.python-version`) and rejects private/local artifacts or archive links. `.github/workflows/ci.yml` runs these checks on Linux and macOS without model credentials or publishing/deploying anything.
+
+### Shared code versus personal state
+
+- **Versioned:** `.pi/extensions/`, `.pi/skills/`, Python/TypeScript sources, tests, manifests, lockfiles and CI.
+- **Local and ignored:** `.pi/memory/`, `.pi/local-memory/`, personal `.pi/settings*.json`, `.env*`, recordings, generated reports, caches, `node_modules/` and `.venv/`.
+- The `.pi` name does not make the extension/skill personal configuration: their paths are declared explicitly in `package.json` and shipped as package resources. No memory adapter or private workspace configuration is required.
+
+Packaging is allowlisted. Never force-add recordings, customer documents, generated analyses or credentials to this repository.

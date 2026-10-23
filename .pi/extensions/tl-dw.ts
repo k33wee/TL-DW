@@ -1055,7 +1055,7 @@ export function enforceAnalysisLimits(
 
 async function attachDocuments(inputs: string[], artifactDir: string, cwd: string, signal: AbortSignal): Promise<void> {
 	if (!inputs.length) return;
-	await runProcess("uv", ["run", "--project", PROJECT_ROOT, "tl-dw", "--bundle", artifactDir,
+	await runProcess("uv", ["run", "--locked", "--project", PROJECT_ROOT, "tl-dw", "--bundle", artifactDir,
 		...inputs.flatMap((value) => ["--attachment", preparationPath(value, cwd)])], cwd, signal, () => {});
 }
 
@@ -1139,6 +1139,7 @@ async function prepareVideo(
 
 	const args = [
 		"run",
+		"--locked",
 		"--project",
 		PROJECT_ROOT,
 		"tl-dw",

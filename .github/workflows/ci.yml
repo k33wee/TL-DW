@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PI_OFFLINE: "1"
+      PI_TELEMETRY: "0"
+      PI_SKIP_VERSION_CHECK: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.5"
+          python-version: "3.13"
+          enable-cache: true
+      - name: Ensure FFmpeg is available
+        shell: bash
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            if [[ "$RUNNER_OS" == "Linux" ]]; then
+              sudo apt-get update
+              sudo apt-get install -y --no-install-recommends ffmpeg
+            else
+              brew install ffmpeg
+            fi
+          fi
+          ffmpeg -version
+          ffprobe -version
+      - name: Install locked development dependencies (no lifecycle scripts)
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          uv sync --locked --extra dev
+      - name: Typecheck, extension tests and clean-home Pi installation
+        run: npm run check
+      - name: Python lint and synthetic media/document tests
+        run: |
+          uv run --locked ruff check tl_dw tests scripts
+          uv run --locked pytest -q
+      - name: Build and audit source distributions
+        run: |
+          uv build --out-dir dist
+          npm pack --ignore-scripts --pack-destination dist
+          uv run --locked python scripts/check_distributions.py dist
+      - name: Smoke the extracted npm package outside the checkout
+        shell: bash
+        run: |
+          smoke=$(mktemp -d)
+          trap 'rm -rf "$smoke"' EXIT
+          archives=(dist/*.tgz)
+          [[ ${#archives[@]} -eq 1 ]]
+          tar -xzf "${archives[0]}" -C "$smoke"
+          TL_DW_TEST_PACKAGE_DIR="$smoke/package" bun test tests/package.test.ts
+          mkdir "$smoke/unrelated cwd"
+          cd "$smoke/unrelated cwd"
+          uv run --locked --project "$smoke/package" tl-dw --help
+      - name: Ensure validation did not change tracked sources or lockfiles
+        run: git diff --exit-code
