@@ -2,8 +2,13 @@
 .github/instructions/
 .DS_Store
 **/.DS_Store
-/ScreenRec-*.mp4
-/Screen Recording *.mov
+# Local recordings: never commit meeting media (including uppercase extensions).
+*.[mM][pP]4
+*.[mM][oO][vV]
+*.[mM][kK][vV]
+*.[aA][vV][iI]
+*.[wW][eE][bB][mM]
+*.[mM]4[vV]
 __pycache__
 *.pyc
 *.pyo
@@ -12,3 +17,22 @@ __pycache__
 .venv/
 output/*
 test-video/
+
+# Personal Pi state/configuration is never part of the shared package.
+/.pi/memory/
+/.pi/local-memory/
+/.pi/settings.json
+/.pi/settings.local.json
+
+# Local dependencies, caches, reports and build output.
+/node_modules/
+/dist/
+/.pytest_cache/
+/.ruff_cache/
+/tl-dw-output/
+/videos/
+
+# Secrets are local; examples must contain placeholders only.
+.env
+.env.*
+!.env.example

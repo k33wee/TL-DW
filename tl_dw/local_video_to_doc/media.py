@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from tl_dw.common.paths import DEFAULT_OUTPUT_DIR, VIDEO_EXTENSIONS
 from tl_dw.common.process import run_command
@@ -11,10 +12,8 @@ from tl_dw.common.process import run_command
 from .models import MediaChapter, MediaInfo, OutputPaths
 from .text_utils import normalize_whitespace, safe_slug
 
-
 DEFAULT_NORMALIZATION_FILTER = (
-    "highpass=f=80,dynaudnorm=f=250:g=15:p=0.95,"
-    "loudnorm=I=-16:TP=-1.5:LRA=11"
+    "highpass=f=80,dynaudnorm=f=250:g=15:p=0.95,loudnorm=I=-16:TP=-1.5:LRA=11"
 )
 
 
@@ -87,6 +86,7 @@ def build_audio_extraction_command(
     *,
     normalize_audio: bool,
     normalization_filter: str,
+    audio_streams: Sequence[int] | None = None,
 ) -> list[str]:
     command = [
         "ffmpeg",
@@ -103,8 +103,26 @@ def build_audio_extraction_command(
         "-ar",
         "16000",
     ]
-    if normalize_audio:
-        command.extend(["-af", normalization_filter])
+    if audio_streams and len(audio_streams) > 1:
+        inputs = "".join(
+            f"[0:{index}]aresample=16000:async=1:first_pts=0,aformat=channel_layouts=mono[a{position}];"
+            for position, index in enumerate(audio_streams)
+        )
+        labels = "".join(f"[a{position}]" for position in range(len(audio_streams)))
+        filters = f"{inputs}{labels}amix=inputs={len(audio_streams)}:duration=longest:dropout_transition=0:normalize=1"
+        if normalize_audio:
+            filters += f",{normalization_filter}"
+        command.extend(["-filter_complex", filters + "[mixed]", "-map", "[mixed]"])
+    else:
+        filters = []
+        if audio_streams:
+            command.extend(["-map", f"0:{audio_streams[0]}"])
+            # Keep source-video time zero even when the selected track starts late.
+            filters.append("aresample=16000:async=1:first_pts=0")
+        if normalize_audio:
+            filters.append(normalization_filter)
+        if filters:
+            command.extend(["-af", ",".join(filters)])
     command.extend(["-c:a", "pcm_s16le", "-f", "wav", str(wav_out)])
     return command
 
@@ -115,6 +133,7 @@ def extract_audio(
     *,
     normalize_audio: bool = True,
     normalization_filter: str = DEFAULT_NORMALIZATION_FILTER,
+    audio_streams: Sequence[int] | None = None,
 ) -> None:
     wav_out.parent.mkdir(parents=True, exist_ok=True)
     run_command(
@@ -123,6 +142,7 @@ def extract_audio(
             wav_out,
             normalize_audio=normalize_audio,
             normalization_filter=normalization_filter,
+            audio_streams=audio_streams,
         )
     )
     if not wav_out.exists():
@@ -205,7 +225,9 @@ def choose_transcription_chapters(
     ignore_source_chapters: bool,
 ) -> tuple[list[MediaChapter], bool]:
     if media_info.chapters and not ignore_source_chapters:
-        return _cover_media_with_chapters(media_info.chapters, media_info.duration), True
+        return _cover_media_with_chapters(
+            media_info.chapters, media_info.duration
+        ), True
 
     end = media_info.duration if media_info.duration > 0 else 0.0
     return [MediaChapter(title="Transcript", start=0.0, end=end)], False
@@ -235,7 +257,9 @@ def _cover_media_with_chapters(
 
     if duration > cursor + 0.001:
         covered.append(MediaChapter(title="Transcript", start=cursor, end=duration))
-    return covered or [MediaChapter(title="Transcript", start=0.0, end=max(0.0, duration))]
+    return covered or [
+        MediaChapter(title="Transcript", start=0.0, end=max(0.0, duration))
+    ]
 
 
 def resolve_output_paths(
@@ -283,6 +307,19 @@ def resolve_videos(video_path: Path | None, video_dir: Path) -> list[Path]:
         candidate = video_path.expanduser().resolve()
         if not candidate.exists():
             raise SystemExit(f"Video file not found: {candidate}")
+        if candidate.is_dir():
+            matches = sorted(
+                p
+                for p in candidate.iterdir()
+                if p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS
+            )
+            if len(matches) != 1:
+                raise SystemExit(
+                    f"Input directory must contain exactly one video; found {len(matches)}. Select --video explicitly."
+                )
+            return matches
+        if not candidate.is_file():
+            raise SystemExit(f"Video is not a regular file: {candidate}")
         if candidate.suffix.lower() not in VIDEO_EXTENSIONS:
             raise SystemExit(f"Unsupported video extension for {candidate.name}")
         return [candidate]
@@ -294,7 +331,7 @@ def resolve_videos(video_path: Path | None, video_dir: Path) -> list[Path]:
     videos = sorted(
         path
         for path in candidate_dir.iterdir()
-        if path.suffix.lower() in VIDEO_EXTENSIONS
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
     )
     if not videos:
         raise SystemExit(f"No supported video files found in {candidate_dir}")

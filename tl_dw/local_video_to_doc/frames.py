@@ -66,7 +66,9 @@ def extract_meaningful_frames(
         shutil.rmtree(frames_dir)
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="tl-dw-frame-scan-") as temp_dir_name:
+    with tempfile.TemporaryDirectory(
+        prefix="tl-dw-frame-scan-", dir=artifact_dir
+    ) as temp_dir_name:
         scan_dir = Path(temp_dir_name)
         _extract_scan_frames(
             video_path=video_path,
@@ -121,8 +123,8 @@ def _extract_scan_frames(
 ) -> None:
     output_pattern = output_dir / "%06d.jpg"
     video_filter = (
-        f"fps=1/{sample_sec:.6f}:start_time=0,"
-        f"scale=w='min(iw,{max_dimension})':h=-2"
+        f"fps=1/{sample_sec:.6f}:start_time=0:eof_action=pass,"
+        f"scale=w='min(iw,{max_dimension})':h=-2:out_range=full,format=yuvj444p"
     )
     run_command(
         [

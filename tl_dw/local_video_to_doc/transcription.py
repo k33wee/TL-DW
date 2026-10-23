@@ -184,7 +184,9 @@ def transcribe_media(
     detected_language = requested_language
     chapter_info: list[dict[str, Any]] = []
 
-    with tempfile.TemporaryDirectory(prefix="local-video-doc-") as temp_dir_name:
+    with tempfile.TemporaryDirectory(
+        prefix="local-video-doc-", dir=audio_path.parent
+    ) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
 
         for index, chapter in enumerate(chapters, start=1):

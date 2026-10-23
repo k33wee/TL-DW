@@ -1,0 +1,33 @@
+{
+  "name": "@keewee/pi-tl-dw",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    ".pi/extensions",
+    ".pi/skills",
+    "tl_dw/**/*.py",
+    "main.py",
+    "pyproject.toml",
+    "uv.lock",
+    "README.md"
+  ],
+  "scripts": {
+    "test:extension": "bun test tests/workflow.test.ts"
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./.pi/extensions/tl-dw.ts"
+    ],
+    "skills": [
+      "./.pi/skills/tl-dw"
+    ]
+  }
+}

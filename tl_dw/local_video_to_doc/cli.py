@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from tl_dw.common.console import env_flag, log
 from tl_dw.common.paths import DEFAULT_VIDEO_DIR
 
+from .artifacts import preparation_lock
+from .documents import prepare_documents
 from .fallback_segmenter import SimpleParagraphSegmenter
 from .media import DEFAULT_NORMALIZATION_FILTER, resolve_videos
 from .ocr import load_ocr_engine
@@ -41,6 +43,46 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         help="Output directory, or a .md file path when processing one video.",
+    )
+    parser.add_argument(
+        "--bundle",
+        type=Path,
+        help="Attach context to an existing analysis.json or directory without ASR/OCR.",
+    )
+    parser.add_argument(
+        "--attachment",
+        type=Path,
+        action="append",
+        default=[],
+        help="Explicit context file or directory (repeatable; local conversion only).",
+    )
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Probe media and estimate space without loading models.",
+    )
+    parser.add_argument(
+        "--force-preparation",
+        action="store_true",
+        help="Explicitly rebuild local preparation stages; otherwise reuse verified checkpoints.",
+    )
+    audio = parser.add_mutually_exclusive_group()
+    audio.add_argument(
+        "--audio-stream",
+        type=int,
+        help="Absolute FFprobe audio stream index to transcribe.",
+    )
+    audio.add_argument(
+        "--audio-mix",
+        type=int,
+        nargs="+",
+        help="Explicitly mix these absolute audio stream indices.",
+    )
+    parser.add_argument(
+        "--audio-diagnostics",
+        choices=("full", "sample"),
+        default="full",
+        help="Volume diagnostics for multiple tracks; only full-track silence can be discarded.",
     )
     _add_transcription_args(parser)
     _add_frame_args(parser)
@@ -96,6 +138,27 @@ def main(argv: Sequence[str] | None = None) -> None:
     _resolve_runtime_args(args)
     _validate_args(args)
 
+    if args.bundle:
+        if args.video or args.preflight_only or not args.attachment:
+            parser.error(
+                "--bundle requires --attachment and cannot be combined with --video/--preflight-only"
+            )
+        bundle = args.bundle.expanduser().resolve()
+        if bundle.is_dir():
+            bundle /= "analysis.json"
+        if not bundle.is_file() or bundle.name != "analysis.json":
+            parser.error(
+                "--bundle must point to an existing analysis.json or its directory"
+            )
+        with preparation_lock(bundle.parent):
+            result = prepare_documents(
+                args.attachment, bundle.parent, force=args.force_preparation
+            )
+        log(
+            f"Prepared {len(result['documents'])} context document(s): {bundle.parent / 'documents.json'}"
+        )
+        return
+
     videos = resolve_videos(args.video, args.video_dir)
     multiple_videos = len(videos) > 1
 
@@ -107,28 +170,36 @@ def main(argv: Sequence[str] | None = None) -> None:
     log(f"Audio normalization: {args.normalize_audio}")
     log(f"Visual frames: {args.use_frames}; OCR: {args.use_ocr}")
 
-    whisper_model = load_whisper_model(
-        model_name=args.whisper_model,
-        device=args.whisper_device,
-        compute_type=args.whisper_compute_type,
-        local_files_only=args.local_files_only,
-    )
-    sat_model = _load_sat_model(args.sat_model)
-    ocr_engine = (
-        load_ocr_engine() if args.use_frames and args.use_ocr else None
-    )
+    resources = {}
+
+    def resource(name):
+        if name not in resources:
+            if name == "whisper":
+                resources[name] = load_whisper_model(
+                    model_name=args.whisper_model,
+                    device=args.whisper_device,
+                    compute_type=args.whisper_compute_type,
+                    local_files_only=args.local_files_only,
+                )
+            elif name == "sat":
+                resources[name] = _load_sat_model(args.sat_model)
+            elif name == "ocr":
+                resources[name] = load_ocr_engine()
+        return resources[name]
 
     try:
         for video_path in videos:
             process_video(
                 video_path=video_path,
                 args=args,
-                whisper_model=whisper_model,
-                sat_model=sat_model,
-                ocr_engine=ocr_engine,
+                whisper_model=None,
+                sat_model=None,
+                ocr_engine=None,
                 multiple_videos=multiple_videos,
+                resource_loader=resource,
             )
     finally:
+        ocr_engine = resources.get("ocr")
         if ocr_engine is not None and hasattr(ocr_engine, "close"):
             ocr_engine.close()
 
