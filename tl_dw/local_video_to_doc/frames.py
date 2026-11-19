@@ -105,9 +105,7 @@ def extract_meaningful_frames(
             f"  ! OCR failed for {ocr_failure_count}/{len(observations)} selected "
             "frames; the images were kept for vision analysis."
         )
-    notes = dedupe_visual_notes(
-        notes, dedupe_window_sec=ocr_dedupe_window_sec
-    )
+    notes = dedupe_visual_notes(notes, dedupe_window_sec=ocr_dedupe_window_sec)
     _write_frame_observations(artifact_dir / "frames.json", observations)
     _write_visual_notes(artifact_dir / "visual_notes.json", notes)
     _write_jsonl(artifact_dir / "ocr.jsonl", ocr_rows)

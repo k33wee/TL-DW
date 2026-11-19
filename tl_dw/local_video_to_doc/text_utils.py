@@ -89,18 +89,16 @@ def build_summary_title(
     word_min = 4 if total >= 80 else 2
     phrase_counts: Counter[tuple[str, str]] = Counter()
     phrase_at: dict[tuple[str, str], int] = {}
-    for (left_at, _, left), (right_at, _, right) in zip(tokens, tokens[1:], strict=False):
+    for (left_at, _, left), (right_at, _, right) in zip(
+        tokens, tokens[1:], strict=False
+    ):
         if right_at != left_at + 1 or left == right:
             continue
         key = (left, right)
         phrase_counts[key] += 1
         phrase_at.setdefault(key, left_at)
 
-    phrases = [
-        key
-        for key, count in phrase_counts.items()
-        if count >= phrase_min
-    ]
+    phrases = [key for key, count in phrase_counts.items() if count >= phrase_min]
     phrases.sort(key=lambda key: (-phrase_counts[key], phrase_at[key]))
     chosen: list[tuple[int, str]] = []
     used: set[str] = set()
@@ -152,7 +150,10 @@ def _phrase_label(key: tuple[str, str], surfaces: dict[str, Counter[str]]) -> st
 
 def _surface(raw: str) -> str:
     letters = [character for character in raw if character.isalpha()]
-    if letters and sum(character.isupper() for character in letters) / len(letters) > 0.8:
+    if (
+        letters
+        and sum(character.isupper() for character in letters) / len(letters) > 0.8
+    ):
         return raw.upper()
     return raw.lower()
 

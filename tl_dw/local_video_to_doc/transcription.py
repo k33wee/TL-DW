@@ -197,10 +197,7 @@ def transcribe_media(
             use_full_audio = (
                 len(chapters) == 1
                 and chapter.start <= 0.001
-                and (
-                    media_duration <= 0.0
-                    or abs(chapter.end - media_duration) <= 0.5
-                )
+                and (media_duration <= 0.0 or abs(chapter.end - media_duration) <= 0.5)
             )
 
             chapter_audio_path = audio_path
