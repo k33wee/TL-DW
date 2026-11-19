@@ -547,3 +547,47 @@ def test_analysis_sections_align_transcript_and_images_without_loss() -> None:
     ]
     assert sections[0]["frames"][0]["image_path"] == "frames/a.jpg"
     assert sections[1]["frames"][0]["image_path"] == "frames/b.jpg"
+
+
+def test_ollama_ocr_engine_lines_shape(monkeypatch, tmp_path):
+    from tl_dw.local_video_to_doc import ocr as ocr_mod
+
+    image = tmp_path / "frame.jpg"
+    image.write_bytes(b"fake")
+
+    calls = {}
+
+    def fake_generate(self, payload):
+        calls["payload"] = payload
+        return {"response": "riga uno\n\nriga due\nriga tre"}
+
+    monkeypatch.setattr(ocr_mod.OllamaOCREngine, "_generate", fake_generate)
+    engine = ocr_mod.OllamaOCREngine(model="glm-ocr:q8_0", base_url="http://x")
+    rows, elapsed = engine(str(image))
+    assert [r[1] for r in rows] == ["riga uno", "riga due", "riga tre"]
+    assert all(r[2] == 0.95 and r[0] is None for r in rows)
+    assert elapsed >= 0
+    assert calls["payload"]["model"] == "glm-ocr:q8_0"
+    assert calls["payload"]["stream"] is False
+    assert calls["payload"]["images"], "immagine base64 attesa"
+
+
+def test_ollama_availability_and_backend_choice(monkeypatch):
+    from tl_dw.local_video_to_doc import ocr as ocr_mod
+
+    monkeypatch.setattr(ocr_mod, "ollama_glm_ocr_available", lambda *a, **k: False)
+    monkeypatch.setattr(ocr_mod, "SubprocessOCREngine", lambda: "rapidocr-engine")
+    monkeypatch.delenv("TL_DW_OCR_BACKEND", raising=False)
+
+    assert ocr_mod.load_ocr_engine() == "rapidocr-engine"
+
+    monkeypatch.setattr(ocr_mod, "ollama_glm_ocr_available", lambda *a, **k: True)
+    assert ocr_mod.load_ocr_engine().model == "glm-ocr:q8_0"
+
+    monkeypatch.setenv("TL_DW_OCR_BACKEND", "rapidocr")
+    assert ocr_mod.load_ocr_engine() == "rapidocr-engine"
+
+    monkeypatch.setenv("TL_DW_OCR_BACKEND", "ollama")
+    monkeypatch.setattr(ocr_mod, "ollama_glm_ocr_available", lambda *a, **k: False)
+    engine = ocr_mod.load_ocr_engine()
+    assert isinstance(engine, ocr_mod.OllamaOCREngine)

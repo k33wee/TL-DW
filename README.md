@@ -22,7 +22,10 @@ The Python CLI:
 3. applies the merged speech-focused normalization pipeline by default;
 4. transcribes with `faster-whisper` (default: `large-v3`, beam size 5, VAD enabled);
 5. scans frames cheaply at a low rate, scores visual changes, keeps one anchor plus meaningful changes per time section, and removes the rest;
-6. optionally enriches retained frames with RapidOCR in an isolated worker process;
+6. optionally enriches retained frames with local OCR — the local Ollama GLM-OCR
+   model (e.g. `glm-ocr:q8_0`) when the daemon exposes it, RapidOCR in an isolated
+   worker process otherwise. `TL_DW_OCR_BACKEND=ollama|rapidocr` forces a backend,
+   `TL_DW_OCR_MODEL` overrides the model tag, `TL_DW_OLLAMA_URL` the daemon address;
 7. writes a portable `analysis.json` that aligns speech and images chronologically.
 
 The default audio filter is:
